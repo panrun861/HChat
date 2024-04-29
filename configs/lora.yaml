@@ -1,7 +1,7 @@
 data_config:
-  train_file: train.json
-  val_file: dev.json
-  test_file: dev.json
+  train_file: data.json
+  val_file: data1.json
+  test_file: data1.json
   num_proc: 16
 max_input_length: 128
 max_output_length: 256

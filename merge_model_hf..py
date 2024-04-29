@@ -17,6 +17,7 @@ TokenizerType = PreTrainedTokenizer | PreTrainedTokenizerFast
 
 app = typer.Typer(pretty_exceptions_show_locals=False)
 
+#接受一个
 def load_model_and_tokenizer(model_dir: Path) -> tuple[ModelType, TokenizerType]:
     model_dir = model_dir.expanduser().resolve()
     if (model_dir / 'adapter_config.json').exists():

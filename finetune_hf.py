@@ -40,7 +40,7 @@ ModelType = Union[PreTrainedModel, PeftModelForCausalLM]
 TokenizerType = Union[PreTrainedTokenizer, PreTrainedTokenizerFast]
 app = typer.Typer(pretty_exceptions_show_locals=False)
 
-
+# 对序列到序列（Seq2Seq）任务的特征数据进行预处理，确保它们具有统一的长度，以便能够正确地被模型处理。
 class DataCollatorForSeq2Seq(_DataCollatorForSeq2Seq):
     def __call__(self, features, return_tensors=None):
         output_ids = (
@@ -68,12 +68,13 @@ class DataCollatorForSeq2Seq(_DataCollatorForSeq2Seq):
                     ).astype(np.int64)
         return super().__call__(features, return_tensors)
 
-
+#重写父类的predict_step方法，以定制特定的预测步骤
+#输入模型，输入数据，是否计算预测损失
 class Seq2SeqTrainer(_Seq2SeqTrainer):
     def prediction_step(
             self,
-            model: nn.Module,
-            inputs: dict[str, Any],
+            model: nn.Module, 
+            inputs: dict[str, Any], 
             prediction_loss_only: bool,
             ignore_keys=None,
             **gen_kwargs,
@@ -86,15 +87,19 @@ class Seq2SeqTrainer(_Seq2SeqTrainer):
             model, inputs, prediction_loss_only, ignore_keys, **gen_kwargs
         )
         generated_tokens = generated_tokens[:, input_ids.size()[1]:]
+        #更新标签
         if self.args.predict_with_generate:
             labels = output_ids
+
+            #返回损失值，处理后的生成标记和标签
         return loss, generated_tokens, labels
 
 
 def _resolve_path(path: Union[str, Path]) -> Path:
     return Path(path).expanduser().resolve()
 
-
+#在训练和调试模型时，对输入和输出标记进行视觉检查，以确保它们符合预期。
+#它特别有用于检查模型是否正确地处理特殊标记，以及输入和输出标记是否匹配。通过查看输出，可以直观地检查是否存在任何明显的错误或不一致。
 def _sanity_check(
         input_ids: Sequence[int],
         output_ids: Sequence[int],
@@ -111,6 +116,7 @@ def _sanity_check(
         print(f'{repr(in_text):>20}: {in_id} -> {out_id}')
 
 
+#返回一个预配置的yaml.YAML对象，该对象以特定的方式（包括缩进和流样式）来解析和生成YAML内容。
 @functools.cache
 def _get_yaml_parser() -> yaml.YAML:
     parser = yaml.YAML(typ='safe', pure=True)
@@ -119,6 +125,7 @@ def _get_yaml_parser() -> yaml.YAML:
     return parser
 
 
+#为数据相关的配置提供了一个结构化的方式，包括数据文件的路径、数据格式和可能的并行处理进程数
 @dc.dataclass
 class DataConfig(object):
     train_file: str
@@ -142,7 +149,7 @@ class DataConfig(object):
             if data_file is not None
         }
 
-
+# 定义了一个名为 FinetuningConfig 的数据类，用于配置微调（finetuning）模型时的各种参数。
 @dc.dataclass
 class FinetuningConfig(object):
     data_config: DataConfig
@@ -167,6 +174,7 @@ class FinetuningConfig(object):
                     or self.training_args.per_device_train_batch_size
             )
 
+    
     @classmethod
     def from_dict(cls, **kwargs) -> 'FinetuningConfig':
         training_args = kwargs.get('training_args', None)
@@ -196,7 +204,7 @@ class FinetuningConfig(object):
         kwargs = _get_yaml_parser().load(path)
         return cls.from_dict(**kwargs)
 
-
+#其主要目的是加载特定格式的数据集。这个函数使用了 load_dataset 函数 来读取并返回一个数据集字典（DatasetDict）。
 def _load_datasets(
         data_dir: Path,
         data_format: str,
@@ -216,7 +224,7 @@ def _load_datasets(
 
     return dataset_dct
 
-
+# 管理数据集的加载、获取和处理。
 class DataManager(object):
     def __init__(self, data_dir: str, data_config: DataConfig):
         self._num_proc = data_config.num_proc
@@ -253,13 +261,14 @@ class DataManager(object):
             num_proc=self._num_proc,
         )
 
-
+# 用于打印预训练模型大小
+#计算并打印一个预训练模型中所有可训练参数的数量，以百万为单位。这可以帮助用户了解模型的规模和潜在的计算需求。
 def print_model_size(model: PreTrainedModel):
     print("--> Model")
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"\n--> model has {total_params / 1e6}M params\n")
 
-
+# 将一批数据（通常来自一个数据集的子集）转换为模型训练或评估所需的格式。具体来说，它处理的是对话数据，其中可能包含用户、系统和工具之间的交互。
 def process_batch(
         batch: Mapping[str, Sequence],
         tokenizer: PreTrainedTokenizer,
@@ -409,7 +418,7 @@ def load_tokenizer_and_model(
 
     return tokenizer, model
 
-
+#对文本摘要生成任务中的预测结果进行评估，并返回 ROUGE 和 BLEU 评估指标的平均值。
 def compute_metrics(eval_preds: EvalPrediction, tokenizer: PreTrainedTokenizer):
     batched_pred_ids, batched_label_ids = eval_preds
 
@@ -435,6 +444,8 @@ def compute_metrics(eval_preds: EvalPrediction, tokenizer: PreTrainedTokenizer):
 
 @app.command()
 def main(
+
+   
         data_dir: Annotated[str, typer.Argument(help='')],
         model_dir: Annotated[
             str,
@@ -444,21 +455,26 @@ def main(
         ],
         config_file: Annotated[str, typer.Argument(help='')],
 ):
+    # 从配置文件加载微调配置
     ft_config = FinetuningConfig.from_file(config_file)
+    # 加载模型和分词器
     tokenizer, model = load_tokenizer_and_model(model_dir, peft_config=ft_config.peft_config)
+    #创建一个DataManager对象，使用data_dir和微调配置中的data_config作为输入
     data_manager = DataManager(data_dir, ft_config.data_config)
-
+    #准备数据集
     train_dataset = data_manager.get_dataset(
-        Split.TRAIN,
+        Split.TRAIN, #数据拆分类型
         functools.partial(
             process_batch,
-            tokenizer=tokenizer,
-            max_input_length=ft_config.max_input_length,
-            max_output_length=ft_config.max_output_length,
-        ),
+            tokenizer=tokenizer, #分词器
+            max_input_length=ft_config.max_input_length, #最大输入长度
+            max_output_length=ft_config.max_output_length, #最大输出长度
+        ),#处理批次函数函数
         batched=True,
     )
+    #打印测试数据集
     print('train_dataset:', train_dataset)
+    
     val_dataset = data_manager.get_dataset(
         Split.VALIDATION,
         functools.partial(
